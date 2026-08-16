@@ -18,7 +18,7 @@
 ## 主要功能
 
 - 五类中文提示词：编程、创意写作、视觉艺术、音频音乐和生产力。
-- 零第三方 Python 依赖的 CLI：列表、搜索、查看、校验和 JSON 导出。
+- 零第三方 Python 依赖的 CLI：列表、搜索、查看、变量填写、统计、校验和 JSON 导出。
 - 标准化元数据：标题、分类、目标模型、语义化版本、标签和作者。
 - GitHub Actions 自动检查提示词格式并运行单元测试。
 - VitePress 文档站，可自动生成提示词目录并部署到 GitHub Pages。
@@ -81,6 +81,23 @@ python3 src/manager.py export prompt-catalog.json
 python3 src/manager.py show prompts/programming/python-refactor.md
 ```
 
+交互填写提示词中的 `{{变量}}`，未通过 `--set` 提供的变量会在终端中依次询问：
+
+```bash
+python3 src/manager.py fill prompts/programming/python-refactor.md
+python3 src/manager.py fill prompts/programming/python-refactor.md \
+  --set source_code="def add(a, b): return a + b" \
+  --set constraints="Python 3.9，无第三方依赖" \
+  --output filled-python-refactor.txt
+```
+
+查看提示词库的分类、模型、变量和热门标签统计：
+
+```bash
+python3 src/manager.py stats
+python3 src/manager.py stats --json
+```
+
 ## 文档网站
 
 需要 Node.js 22 或更高版本。
@@ -115,7 +132,7 @@ python3 -m unittest discover -s tests -v
 - [x] 本地 CLI 检索、校验与 JSON 导出
 - [x] 自动化测试和文档构建
 - [ ] 为提示词增加质量评分与兼容性记录
-- [ ] 支持变量占位符交互填写
+- [x] 支持变量占位符交互填写
 - [ ] 开发轻量 Web 检索界面
 - [ ] 建立社区审核与版本发布节奏
 

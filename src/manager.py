@@ -8,6 +8,7 @@ import ast
 import json
 import re
 import sys
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -25,6 +26,10 @@ ALLOWED_CATEGORIES = {
 REQUIRED_FIELDS = {"title", "category", "target_model", "version", "tags", "author"}
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 FRONTMATTER_PATTERN = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+VARIABLE_PATTERN = re.compile(r"\{\{\s*([^\W\d][\w-]*)\s*\}\}")
+PROMPT_BLOCK_PATTERN = re.compile(
+    r"(?ms)\A\s*```text[ \t]*\r?\n(?P<content>.+?)^```[ \t]*(?:\r?\n|\Z)"
+)
 
 
 @dataclass(frozen=True)
@@ -95,6 +100,22 @@ def load_all_prompts(prompts_dir: Path = DEFAULT_PROMPTS_DIR) -> list[PromptReco
     return [load_prompt(path, prompts_dir) for path in discover_prompt_paths(prompts_dir)]
 
 
+def extract_prompt_text(content: str) -> str:
+    """从提示词 Markdown 正文中提取 text 代码块。"""
+    prompt_heading = re.search(r"(?m)^### 提示词内容[ \t]*$", content)
+    if not prompt_heading:
+        raise ValueError("正文缺少“### 提示词内容”标题")
+    match = PROMPT_BLOCK_PATTERN.search(content[prompt_heading.end() :])
+    if not match:
+        raise ValueError("提示词正文必须放在完整的 ```text 代码块中")
+    return match.group("content").strip()
+
+
+def find_variables(text: str) -> list[str]:
+    """按首次出现顺序返回提示词中的变量名。"""
+    return list(dict.fromkeys(VARIABLE_PATTERN.findall(text)))
+
+
 def validate_prompt(path: Path, prompts_dir: Path = DEFAULT_PROMPTS_DIR) -> list[str]:
     errors: list[str] = []
     try:
@@ -108,11 +129,11 @@ def validate_prompt(path: Path, prompts_dir: Path = DEFAULT_PROMPTS_DIR) -> list
         errors.append("缺少字段：" + ", ".join(missing))
 
     category = metadata.get("category")
-    if category not in ALLOWED_CATEGORIES:
+    if not isinstance(category, str) or category not in ALLOWED_CATEGORIES:
         errors.append(f"category 必须是：{', '.join(sorted(ALLOWED_CATEGORIES))}")
     try:
         expected_category = path.resolve().relative_to(prompts_dir.resolve()).parts[0]
-        if category and category != expected_category:
+        if isinstance(category, str) and category and category != expected_category:
             errors.append(f"category={category!r} 与目录 {expected_category!r} 不一致")
     except (ValueError, IndexError):
         errors.append("文件不在 prompts 目录中")
@@ -129,10 +150,10 @@ def validate_prompt(path: Path, prompts_dir: Path = DEFAULT_PROMPTS_DIR) -> list
     tags = metadata.get("tags")
     if not isinstance(tags, list) or not tags or not all(isinstance(tag, str) and tag.strip() for tag in tags):
         errors.append("tags 必须是至少包含一个非空字符串的列表")
-    if "### 提示词内容" not in body:
-        errors.append("正文缺少“### 提示词内容”标题")
-    if "```text" not in body:
-        errors.append("提示词正文必须放在 ```text 代码块中")
+    try:
+        extract_prompt_text(body)
+    except ValueError as exc:
+        errors.append(str(exc))
     return errors
 
 
@@ -201,6 +222,100 @@ def command_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_fill(args: argparse.Namespace) -> int:
+    path = (PROJECT_ROOT / args.path).resolve()
+    try:
+        path.relative_to(args.prompts_dir.resolve())
+    except ValueError:
+        print("错误：只能填写 prompts 目录中的文件。", file=sys.stderr)
+        return 2
+    if not path.is_file():
+        print(f"错误：文件不存在：{args.path}", file=sys.stderr)
+        return 2
+    errors = validate_prompt(path, args.prompts_dir)
+    if errors:
+        print(f"错误：提示词格式无效：{args.path}", file=sys.stderr)
+        for error in errors:
+            print(f"  - {error}", file=sys.stderr)
+        return 2
+
+    prompt_text = extract_prompt_text(load_prompt(path, args.prompts_dir).content)
+    variables = find_variables(prompt_text)
+    values: dict[str, str] = {}
+    for assignment in args.values:
+        if "=" not in assignment:
+            print(f"错误：变量赋值必须使用 NAME=VALUE 格式：{assignment}", file=sys.stderr)
+            return 2
+        name, value = assignment.split("=", 1)
+        name = name.strip()
+        if name not in variables:
+            print(f"错误：提示词中不存在变量 {name!r}。", file=sys.stderr)
+            return 2
+        values[name] = value
+
+    for name in variables:
+        if name in values:
+            continue
+        try:
+            values[name] = input(f"{name}: ")
+        except EOFError:
+            missing = [variable for variable in variables if variable not in values]
+            print(
+                "错误：无法交互读取变量，请使用 --set 提供：" + ", ".join(missing),
+                file=sys.stderr,
+            )
+            return 2
+
+    rendered = VARIABLE_PATTERN.sub(lambda match: values[match.group(1)], prompt_text)
+    if args.output:
+        output = Path(args.output)
+        if not output.is_absolute():
+            output = PROJECT_ROOT / output
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered + "\n", encoding="utf-8")
+        print(f"✅ 已填写提示词并保存到 {output}")
+    else:
+        print(rendered)
+    return 0
+
+
+def command_stats(args: argparse.Namespace) -> int:
+    failures = validate_repository(args.prompts_dir)
+    if failures:
+        print("错误：提示词库存在格式问题，请先运行 validate。", file=sys.stderr)
+        return 1
+    prompts = load_all_prompts(args.prompts_dir)
+    categories = Counter(prompt.category for prompt in prompts)
+    models = Counter(prompt.target_model for prompt in prompts)
+    tags = Counter(tag for prompt in prompts for tag in prompt.tags)
+    variables = Counter(
+        variable
+        for prompt in prompts
+        for variable in find_variables(extract_prompt_text(prompt.content))
+    )
+    report = {
+        "total": len(prompts),
+        "categories": dict(sorted(categories.items())),
+        "target_models": dict(sorted(models.items())),
+        "tags": dict(sorted(tags.items(), key=lambda item: (-item[1], item[0]))),
+        "variables": dict(sorted(variables.items(), key=lambda item: (-item[1], item[0]))),
+    }
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"提示词总数：{report['total']}")
+    print("\n分类：")
+    for category in sorted(ALLOWED_CATEGORIES):
+        print(f"  {category}: {categories.get(category, 0)}")
+    print(f"\n目标模型：{len(models)} 种")
+    for model, count in models.most_common():
+        print(f"  {model}: {count}")
+    print(f"\n变量：{len(variables)} 个不同变量，{sum(variables.values())} 次使用")
+    print("热门标签：" + (", ".join(f"{tag} ({count})" for tag, count in tags.most_common(10)) or "无"))
+    return 0
+
+
 def command_validate(args: argparse.Namespace) -> int:
     paths = discover_prompt_paths(args.prompts_dir)
     if not paths:
@@ -240,6 +355,11 @@ def command_docs(args: argparse.Namespace) -> int:
     if not output.is_absolute():
         output = PROJECT_ROOT / output
     library_dir = PROJECT_ROOT / "docs" / "library"
+    expected_pages = {Path(prompt.path) for prompt in prompts}
+    if library_dir.exists():
+        for existing_page in library_dir.rglob("*.md"):
+            if existing_page.relative_to(library_dir) not in expected_pages:
+                existing_page.unlink()
     lines = ["# 提示词目录", "", "此页面由 `python3 src/manager.py docs` 自动生成。", ""]
     for category in sorted(ALLOWED_CATEGORIES):
         category_prompts = [prompt for prompt in prompts if prompt.category == category]
@@ -252,7 +372,7 @@ def command_docs(args: argparse.Namespace) -> int:
                 "\n".join(
                     [
                         "---",
-                        f'title: "{prompt.title}"',
+                        f"title: {json.dumps(prompt.title, ensure_ascii=False)}",
                         "---",
                         "",
                         f"# {prompt.title}",
@@ -301,6 +421,16 @@ def build_parser() -> argparse.ArgumentParser:
     show_parser = subparsers.add_parser("show", help="显示完整提示词文件")
     show_parser.add_argument("path", help="相对于项目根目录的路径")
     show_parser.set_defaults(func=command_show)
+    fill_parser = subparsers.add_parser("fill", help="填写提示词变量")
+    fill_parser.add_argument("path", help="相对于项目根目录的提示词路径")
+    fill_parser.add_argument(
+        "--set", dest="values", action="append", default=[], metavar="NAME=VALUE", help="预设变量，可重复使用"
+    )
+    fill_parser.add_argument("--output", "-o", help="将填写结果保存到文件；默认输出到终端")
+    fill_parser.set_defaults(func=command_fill)
+    stats_parser = subparsers.add_parser("stats", help="显示提示词库统计")
+    stats_parser.add_argument("--json", action="store_true", help="输出 JSON")
+    stats_parser.set_defaults(func=command_stats)
     validate_parser = subparsers.add_parser("validate", help="校验全部提示词")
     validate_parser.set_defaults(func=command_validate)
     export_parser = subparsers.add_parser("export", help="导出提示词目录")
