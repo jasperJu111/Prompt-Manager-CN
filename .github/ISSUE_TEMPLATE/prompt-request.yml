@@ -1,0 +1,31 @@
+name: 提示词建议
+description: 建议新增或改进一个提示词
+title: "[Prompt]: "
+labels: ["prompt"]
+body:
+  - type: dropdown
+    id: category
+    attributes:
+      label: 分类
+      options:
+        - programming
+        - creative-writing
+        - visual-art
+        - audio-music
+        - productivity
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: 使用场景
+      description: 请说明要解决的问题、输入信息和理想输出。
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: 目标模型
+      placeholder: 通用大语言模型、图像生成模型等
+    validations:
+      required: true

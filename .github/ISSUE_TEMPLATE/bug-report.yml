@@ -1,0 +1,27 @@
+name: 问题报告
+description: 报告 CLI、文档或工作流中的问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 请写明你执行了什么、预期结果和实际结果。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 执行……
+        2. 输入……
+        3. 看到……
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      placeholder: macOS / Windows / Linux，Python 版本
