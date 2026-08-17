@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: "提示管理器-CN"
+  name: "提示词管理器-CN"
   text: "把中文提示词变成可维护的开源资产"
   tagline: "统一格式、快速检索、自动校验、社区协作"
   actions:

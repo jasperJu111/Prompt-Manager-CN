@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""提示管理器-CN：提示词检索、校验、导出和文档生成工具。"""
+"""提示词管理器-CN：提示词检索、校验、导出和文档生成工具。"""
 
 from __future__ import annotations
 
@@ -407,7 +407,7 @@ def command_docs(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="提示管理器-CN 命令行工具")
+    parser = argparse.ArgumentParser(description="提示词管理器-CN 命令行工具")
     parser.set_defaults(prompts_dir=DEFAULT_PROMPTS_DIR)
     subparsers = parser.add_subparsers(dest="command", required=True)
     list_parser = subparsers.add_parser("list", help="列出提示词")

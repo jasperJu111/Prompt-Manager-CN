@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   lang: 'zh-CN',
-  title: '提示管理器-CN',
+  title: '提示词管理器-CN',
   description: '面向中文开发者与创作者的开源 AI 提示词库',
   base: '/Prompt-Manager-CN/',
   cleanUrls: true,
